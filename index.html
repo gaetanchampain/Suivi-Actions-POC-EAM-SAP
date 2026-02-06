@@ -19,12 +19,14 @@ body{background:linear-gradient(160deg,#0b0e18 0%,#10141f 40%,#0d1117 100%);font
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
 input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.7)}
 @keyframes syncPulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes alertPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.4)}70%{box-shadow:0 0 0 8px rgba(239,68,68,0)}}
 .sync-indicator{display:inline-flex;align-items:center;gap:5px;font-size:10px;padding:3px 8px;border-radius:5px}
 .sync-online{background:rgba(16,185,129,0.15);color:#34d399}
 .sync-offline{background:rgba(239,68,68,0.15);color:#f87171}
 .sync-dot{width:6px;height:6px;border-radius:50%;animation:syncPulse 2s ease-in-out infinite}
 .filter-group{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:10px 14px}
 .filter-label{font-size:9px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#525d6e;margin-bottom:8px;display:block}
+.alert-card{animation:alertPulse 2s infinite}
 </style>
 </head>
 <body>
@@ -78,6 +80,7 @@ const PRIOS={
   moyenne:{label:"Moyenne",color:"#3b82f6",icon:"🔵"},
 };
 const CATS=["Architecte","Data","EO","PM","SAP","Pilote"];
+const CAT_COLORS={Architecte:"#a78bfa",Data:"#34d399",EO:"#fbbf24",PM:"#f472b6",SAP:"#60a5fa",Pilote:"#fb923c"};
 const gid=()=>"a"+Date.now()+Math.random().toString(36).slice(2,6);
 
 const normalizeAction=(a)=>({...a,responsables:Array.isArray(a.responsables)?a.responsables:[]});
@@ -93,7 +96,13 @@ const initFirebase=(callback)=>{
   });
 };
 
-/* UI */
+// Helpers
+const today=new Date();today.setHours(0,0,0,0);
+const isLate=(a)=>a.statut!=="fait"&&new Date(a.dateFin)<today;
+const daysLate=(a)=>Math.ceil((today-new Date(a.dateFin))/(1000*60*60*24));
+const isThisWeek=(a)=>{const d=new Date(a.dateFin);const diff=(d-today)/(1000*60*60*24);return diff>=0&&diff<=7&&a.statut!=="fait";};
+
+/* UI Components */
 function Modal({open,onClose,title,children}){
   if(!open)return null;
   return(<div style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
@@ -109,7 +118,7 @@ function FL({children}){return <label style={{display:"block",fontSize:"10px",fo
 function Inp({value,onChange,placeholder,type="text",style:s={},onKeyDown}){return <input type={type} value={value||""} onChange={onChange} placeholder={placeholder} onKeyDown={onKeyDown} style={{width:"100%",padding:"9px 13px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"9px",color:"#e2e8f0",fontSize:"13px",outline:"none",boxSizing:"border-box",...s}}/>;}
 function Sel({value,onChange,children,style:s={}}){return <select value={value||""} onChange={onChange} style={{width:"100%",padding:"9px 13px",background:"#151a28",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"9px",color:"#e2e8f0",fontSize:"13px",outline:"none",boxSizing:"border-box",...s}}>{children}</select>;}
 function Btn({onClick,children,variant="primary",style:s={}}){
-  const V={primary:{background:"rgba(129,140,248,0.15)",border:"1px solid rgba(129,140,248,0.3)",color:"#c7d2fe"},danger:{background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.25)",color:"#fca5a5"},ghost:{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",color:"#94a3b8"}};
+  const V={primary:{background:"rgba(129,140,248,0.15)",border:"1px solid rgba(129,140,248,0.3)",color:"#c7d2fe"},danger:{background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.25)",color:"#fca5a5"},ghost:{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",color:"#94a3b8"},success:{background:"rgba(16,185,129,0.12)",border:"1px solid rgba(16,185,129,0.3)",color:"#6ee7b7"}};
   return <button onClick={onClick} style={{padding:"8px 16px",borderRadius:"9px",fontSize:"12px",fontWeight:600,cursor:"pointer",transition:"all 0.2s",...V[variant],...s}}>{children}</button>;
 }
 function SyncStatus({online}){return(<div className={`sync-indicator ${online?'sync-online':'sync-offline'}`}><div className="sync-dot" style={{background:online?'#34d399':'#f87171'}}/>{online?'Synchro':'Hors ligne'}</div>);}
@@ -118,6 +127,217 @@ function RespChips({list}){
   if(!items.length)return <span style={{fontSize:"11px",color:"#475569",fontStyle:"italic"}}>Non assigné</span>;
   return(<div style={{display:"flex",flexWrap:"wrap",gap:"4px"}}>
     {items.map((r,i)=><span key={i} style={{fontSize:"11px",fontWeight:600,padding:"3px 9px",borderRadius:"6px",background:"rgba(255,255,255,0.08)",color:"#e2e8f0",border:"1px solid rgba(255,255,255,0.06)"}}>{r}</span>)}
+  </div>);
+}
+
+/* Donut Chart */
+function DonutChart({data,size=160}){
+  const total=data.reduce((s,d)=>s+d.value,0);
+  if(total===0)return<div style={{width:size,height:size,display:"flex",alignItems:"center",justifyContent:"center",color:"#475569"}}>Aucune donnée</div>;
+  let acc=0;
+  const segments=data.filter(d=>d.value>0).map(d=>{const start=acc;acc+=(d.value/total)*360;return{...d,start,end:acc};});
+  const r=size/2-10;const cx=size/2;const cy=size/2;
+  const polarToCart=(angle,radius)=>({x:cx+radius*Math.cos((angle-90)*Math.PI/180),y:cy+radius*Math.sin((angle-90)*Math.PI/180)});
+  return(<svg width={size} height={size} style={{display:"block"}}>
+    {segments.map((seg,i)=>{
+      const s=polarToCart(seg.start,r);const e=polarToCart(seg.end,r);const large=seg.end-seg.start>180?1:0;
+      return<path key={i} d={`M${cx},${cy} L${s.x},${s.y} A${r},${r} 0 ${large} 1 ${e.x},${e.y} Z`} fill={seg.color} style={{opacity:0.85}}/>;
+    })}
+    <circle cx={cx} cy={cy} r={r*0.6} fill="#10141f"/>
+    <text x={cx} y={cy-5} textAnchor="middle" fill="#e2e8f0" fontSize="22" fontWeight="700">{total}</text>
+    <text x={cx} y={cy+12} textAnchor="middle" fill="#64748b" fontSize="10">actions</text>
+  </svg>);
+}
+
+/* Bar Chart */
+function BarChart({data,height=180}){
+  const max=Math.max(...data.map(d=>d.value),1);
+  return(<div style={{display:"flex",alignItems:"flex-end",gap:"8px",height,padding:"10px 0"}}>
+    {data.map((d,i)=>(<div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:"6px"}}>
+      <span style={{fontSize:"12px",fontWeight:700,color:d.color}}>{d.value}</span>
+      <div style={{width:"100%",maxWidth:"40px",height:`${(d.value/max)*100}%`,minHeight:"4px",background:d.color,borderRadius:"4px 4px 0 0",opacity:0.8,transition:"height 0.5s ease"}}/>
+      <span style={{fontSize:"9px",color:"#64748b",textAlign:"center",lineHeight:1.2}}>{d.label}</span>
+    </div>))}
+  </div>);
+}
+
+/* Progress Ring */
+function ProgressRing({percent,size=100,color="#818cf8"}){
+  const r=size/2-8;const circ=2*Math.PI*r;const offset=circ-(percent/100)*circ;
+  return(<svg width={size} height={size} style={{transform:"rotate(-90deg)"}}>
+    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="8"/>
+    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth="8" strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={offset} style={{transition:"stroke-dashoffset 0.8s ease"}}/>
+    <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="middle" fill="#e2e8f0" fontSize="18" fontWeight="700" style={{transform:"rotate(90deg)",transformOrigin:"center"}}>{percent}%</text>
+  </svg>);
+}
+
+/* Dashboard View */
+function DashboardView({actions,onEdit,onStatusChange}){
+  const stats={
+    total:actions.length,
+    fait:actions.filter(a=>a.statut==="fait").length,
+    en_cours:actions.filter(a=>a.statut==="en_cours").length,
+    a_faire:actions.filter(a=>a.statut==="a_faire").length,
+    bloque:actions.filter(a=>a.statut==="bloque").length,
+    critique:actions.filter(a=>a.priorite==="critique"&&a.statut!=="fait").length,
+    late:actions.filter(isLate).length,
+    thisWeek:actions.filter(isThisWeek).length,
+  };
+  const pct=stats.total>0?Math.round((stats.fait/stats.total)*100):0;
+  const lateActions=actions.filter(isLate).sort((a,b)=>new Date(a.dateFin)-new Date(b.dateFin));
+  const weekActions=actions.filter(isThisWeek).sort((a,b)=>new Date(a.dateFin)-new Date(b.dateFin));
+  
+  const statutData=[
+    {label:"À faire",value:stats.a_faire,color:"#64748b"},
+    {label:"En cours",value:stats.en_cours,color:"#60a5fa"},
+    {label:"Fait",value:stats.fait,color:"#10b981"},
+    {label:"Bloqué",value:stats.bloque,color:"#ef4444"},
+  ];
+  const catData=CATS.map(c=>({label:c,value:actions.filter(a=>a.categorie===c).length,color:CAT_COLORS[c]}));
+  const prioData=[
+    {label:"Critique",value:actions.filter(a=>a.priorite==="critique"&&a.statut!=="fait").length,color:"#ef4444"},
+    {label:"Haute",value:actions.filter(a=>a.priorite==="haute"&&a.statut!=="fait").length,color:"#f59e0b"},
+    {label:"Moyenne",value:actions.filter(a=>a.priorite==="moyenne"&&a.statut!=="fait").length,color:"#3b82f6"},
+  ];
+
+  return(<div style={{display:"flex",flexDirection:"column",gap:"20px"}}>
+    {/* KPIs Row */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:"10px"}}>
+      {[
+        {l:"Total",v:stats.total,c:"#818cf8",icon:"📊"},
+        {l:"Terminées",v:stats.fait,c:"#10b981",icon:"✅"},
+        {l:"En cours",v:stats.en_cours,c:"#60a5fa",icon:"🔄"},
+        {l:"À faire",v:stats.a_faire,c:"#64748b",icon:"📝"},
+        {l:"Bloquées",v:stats.bloque,c:"#ef4444",icon:"🚫"},
+        {l:"En retard",v:stats.late,c:stats.late>0?"#ef4444":"#64748b",icon:"⚠️"},
+      ].map((s,i)=>(
+        <div key={i} style={{background:s.v>0&&s.l==="En retard"?"rgba(239,68,68,0.08)":"rgba(255,255,255,0.02)",border:`1px solid ${s.v>0&&s.l==="En retard"?"rgba(239,68,68,0.2)":"rgba(255,255,255,0.04)"}`,borderRadius:"12px",padding:"16px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"8px"}}>
+            <span style={{fontSize:"16px"}}>{s.icon}</span>
+            <span style={{fontSize:"10px",textTransform:"uppercase",letterSpacing:"1px",color:"#64748b",fontWeight:500}}>{s.l}</span>
+          </div>
+          <div style={{fontSize:"28px",fontWeight:700,color:s.c}}>{s.v}</div>
+        </div>
+      ))}
+    </div>
+
+    {/* Charts Row */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:"16px"}}>
+      {/* Progress + Donut */}
+      <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",borderRadius:"14px",padding:"20px"}}>
+        <h3 style={{fontSize:"13px",fontWeight:600,color:"#94a3b8",marginBottom:"16px",letterSpacing:"0.5px"}}>📈 PROGRESSION GLOBALE</h3>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-around",gap:"20px"}}>
+          <ProgressRing percent={pct} size={110} color="#10b981"/>
+          <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+            {statutData.map((s,i)=>(<div key={i} style={{display:"flex",alignItems:"center",gap:"8px"}}>
+              <div style={{width:"10px",height:"10px",borderRadius:"3px",background:s.color}}/>
+              <span style={{fontSize:"11px",color:"#94a3b8",minWidth:"60px"}}>{s.label}</span>
+              <span style={{fontSize:"12px",fontWeight:600,color:s.color}}>{s.value}</span>
+            </div>))}
+          </div>
+        </div>
+      </div>
+
+      {/* Par catégorie */}
+      <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",borderRadius:"14px",padding:"20px"}}>
+        <h3 style={{fontSize:"13px",fontWeight:600,color:"#94a3b8",marginBottom:"16px",letterSpacing:"0.5px"}}>📁 PAR CATÉGORIE</h3>
+        <BarChart data={catData} height={140}/>
+      </div>
+
+      {/* Par priorité */}
+      <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",borderRadius:"14px",padding:"20px"}}>
+        <h3 style={{fontSize:"13px",fontWeight:600,color:"#94a3b8",marginBottom:"16px",letterSpacing:"0.5px"}}>🎯 PAR PRIORITÉ (ouvertes)</h3>
+        <BarChart data={prioData} height={140}/>
+      </div>
+    </div>
+
+    {/* Alerts Section */}
+    {lateActions.length>0&&(
+      <div style={{background:"rgba(239,68,68,0.05)",border:"1px solid rgba(239,68,68,0.15)",borderRadius:"14px",padding:"20px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"}}>
+          <h3 style={{fontSize:"14px",fontWeight:700,color:"#fca5a5",display:"flex",alignItems:"center",gap:"8px"}}>
+            <span style={{fontSize:"18px"}}>🚨</span> ACTIONS EN RETARD ({lateActions.length})
+          </h3>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+          {lateActions.map(a=>{
+            const days=daysLate(a);const pr=PRIOS[a.priorite];const st=STATUTS[a.statut];
+            return(<div key={a.id} className="alert-card" style={{background:"rgba(0,0,0,0.2)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"10px",padding:"12px 16px",display:"flex",alignItems:"center",gap:"12px"}}>
+              <div style={{width:"40px",height:"40px",borderRadius:"10px",background:"rgba(239,68,68,0.15)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <span style={{fontSize:"14px",fontWeight:700,color:"#ef4444"}}>-{days}j</span>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:"12px",fontWeight:600,color:"#e2e8f0",marginBottom:"4px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.action}</div>
+                <div style={{display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
+                  <span style={{fontSize:"9px",fontWeight:600,padding:"2px 6px",borderRadius:"4px",background:st.bg,color:st.color}}>{st.label}</span>
+                  <span style={{fontSize:"9px",color:pr.color,fontWeight:600}}>{pr.icon} {pr.label}</span>
+                  <RespChips list={a.responsables}/>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:"6px",flexShrink:0}}>
+                <Btn variant="ghost" onClick={()=>onEdit(a)} style={{padding:"6px 10px",fontSize:"10px"}}>✎</Btn>
+                <Btn variant="success" onClick={()=>onStatusChange(a.id,"en_cours")} style={{padding:"6px 10px",fontSize:"10px"}}>▶ Relancer</Btn>
+              </div>
+            </div>);
+          })}
+        </div>
+      </div>
+    )}
+
+    {/* This Week */}
+    {weekActions.length>0&&(
+      <div style={{background:"rgba(251,191,36,0.05)",border:"1px solid rgba(251,191,36,0.15)",borderRadius:"14px",padding:"20px"}}>
+        <h3 style={{fontSize:"14px",fontWeight:700,color:"#fcd34d",marginBottom:"16px",display:"flex",alignItems:"center",gap:"8px"}}>
+          <span style={{fontSize:"18px"}}>📅</span> ÉCHÉANCES CETTE SEMAINE ({weekActions.length})
+        </h3>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:"10px"}}>
+          {weekActions.map(a=>{
+            const d=new Date(a.dateFin);const diff=Math.ceil((d-today)/(1000*60*60*24));const pr=PRIOS[a.priorite];const st=STATUTS[a.statut];
+            return(<div key={a.id} style={{background:"rgba(0,0,0,0.2)",border:"1px solid rgba(251,191,36,0.1)",borderRadius:"10px",padding:"12px 14px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px"}}>
+                <span style={{fontSize:"10px",fontWeight:700,padding:"3px 8px",borderRadius:"5px",background:diff===0?"rgba(239,68,68,0.15)":diff<=2?"rgba(251,191,36,0.15)":"rgba(96,165,250,0.1)",color:diff===0?"#fca5a5":diff<=2?"#fcd34d":"#93c5fd"}}>
+                  {diff===0?"Aujourd'hui":diff===1?"Demain":`Dans ${diff}j`}
+                </span>
+                <span style={{fontSize:"9px",color:pr.color,fontWeight:600}}>{pr.icon}</span>
+                <span style={{fontSize:"9px",fontWeight:600,padding:"2px 6px",borderRadius:"4px",background:st.bg,color:st.color}}>{st.label}</span>
+              </div>
+              <div style={{fontSize:"12px",fontWeight:600,color:"#e2e8f0",marginBottom:"6px"}}>{a.action}</div>
+              <RespChips list={a.responsables}/>
+            </div>);
+          })}
+        </div>
+      </div>
+    )}
+
+    {/* All good message */}
+    {lateActions.length===0&&weekActions.length===0&&(
+      <div style={{background:"rgba(16,185,129,0.05)",border:"1px solid rgba(16,185,129,0.15)",borderRadius:"14px",padding:"30px",textAlign:"center"}}>
+        <span style={{fontSize:"40px",display:"block",marginBottom:"12px"}}>🎉</span>
+        <h3 style={{fontSize:"16px",fontWeight:600,color:"#6ee7b7",marginBottom:"6px"}}>Tout est sous contrôle !</h3>
+        <p style={{fontSize:"12px",color:"#64748b"}}>Aucune action en retard, aucune échéance urgente cette semaine.</p>
+      </div>
+    )}
+
+    {/* Workload by person */}
+    <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",borderRadius:"14px",padding:"20px"}}>
+      <h3 style={{fontSize:"13px",fontWeight:600,color:"#94a3b8",marginBottom:"16px",letterSpacing:"0.5px"}}>👥 CHARGE PAR RESPONSABLE</h3>
+      <div style={{display:"flex",flexWrap:"wrap",gap:"10px"}}>
+        {(() => {
+          const resp={};
+          actions.filter(a=>a.statut!=="fait").forEach(a=>{
+            (a.responsables||[]).forEach(r=>{resp[r]=(resp[r]||0)+1;});
+          });
+          const sorted=Object.entries(resp).sort((a,b)=>b[1]-a[1]);
+          if(sorted.length===0)return<span style={{fontSize:"12px",color:"#64748b"}}>Aucune action assignée en cours</span>;
+          return sorted.map(([name,count],i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:"8px",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"8px",padding:"8px 12px"}}>
+              <span style={{fontSize:"12px",fontWeight:600,color:"#e2e8f0"}}>{name}</span>
+              <span style={{fontSize:"11px",fontWeight:700,padding:"2px 8px",borderRadius:"10px",background:count>3?"rgba(239,68,68,0.15)":count>1?"rgba(251,191,36,0.15)":"rgba(16,185,129,0.15)",color:count>3?"#fca5a5":count>1?"#fcd34d":"#6ee7b7"}}>{count}</span>
+            </div>
+          ));
+        })()}
+      </div>
+    </div>
   </div>);
 }
 
@@ -179,32 +399,32 @@ function TimelineView({actions,onEdit}){
   days.forEach(d=>{const wn=gW(d);const k=d.getFullYear()+"-W"+wn;if(!cw||cw.key!==k){cw={key:k,label:"S"+wn,days:1};weeks.push(cw);}else{cw.days++;}});
   function gW(d){const t=new Date(d);t.setHours(0,0,0,0);t.setDate(t.getDate()+3-((t.getDay()+6)%7));const w1=new Date(t.getFullYear(),0,4);return 1+Math.round(((t-w1)/864e5-3+((w1.getDay()+6)%7))/7);}
   const sorted=[...actions].sort((a,b)=>new Date(a.dateDebut)-new Date(b.dateDebut));
-  const today=new Date();today.setHours(0,0,0,0);const tOff=Math.ceil((today-mn)/864e5);
-  const catColors={Architecte:"#a78bfa",Data:"#34d399",EO:"#fbbf24",PM:"#f472b6",SAP:"#60a5fa",Pilote:"#fb923c"};
+  const todayDate=new Date();todayDate.setHours(0,0,0,0);const tOff=Math.ceil((todayDate-mn)/864e5);
   return(<div style={{overflowX:"auto",borderRadius:"12px",border:"1px solid rgba(255,255,255,0.04)",background:"rgba(255,255,255,0.015)"}}>
     <div style={{minWidth:td*dw+300}}>
       <div style={{display:"flex",position:"sticky",top:0,zIndex:10,background:"#10141f"}}>
         <div style={{width:"300px",minWidth:"300px",padding:"8px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)",borderRight:"1px solid rgba(255,255,255,0.04)",display:"flex",alignItems:"flex-end"}}><span style={{fontSize:"10px",fontWeight:600,color:"#525d6e",letterSpacing:"1.5px",textTransform:"uppercase"}}>Action</span></div>
         <div style={{flex:1}}>
           <div style={{display:"flex",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>{weeks.map(w=><div key={w.key} style={{width:w.days*dw,minWidth:w.days*dw,padding:"5px 0",textAlign:"center",fontSize:"10px",fontWeight:600,color:"#818cf8",borderRight:"1px solid rgba(255,255,255,0.03)"}}>{w.label}</div>)}</div>
-          <div style={{display:"flex",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>{days.map((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const it=d.toDateString()===today.toDateString();return<div key={i} style={{width:dw,minWidth:dw,padding:"3px 0",textAlign:"center",fontSize:"9px",fontWeight:it?700:400,color:it?"#818cf8":we?"#2a3040":"#475569",background:it?"rgba(129,140,248,0.06)":we?"rgba(0,0,0,0.12)":"transparent",borderRight:"1px solid rgba(255,255,255,0.02)"}}>{d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"}).replace(".","")}</div>;})}</div>
+          <div style={{display:"flex",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>{days.map((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const it=d.toDateString()===todayDate.toDateString();return<div key={i} style={{width:dw,minWidth:dw,padding:"3px 0",textAlign:"center",fontSize:"9px",fontWeight:it?700:400,color:it?"#818cf8":we?"#2a3040":"#475569",background:it?"rgba(129,140,248,0.06)":we?"rgba(0,0,0,0.12)":"transparent",borderRight:"1px solid rgba(255,255,255,0.02)"}}>{d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"}).replace(".","")}</div>;})}</div>
         </div>
       </div>
       {sorted.map((a,i)=>{
         const s=Math.max(0,Math.ceil((new Date(a.dateDebut)-mn)/864e5));const e=Math.ceil((new Date(a.dateFin)-mn)/864e5);
-        const w=Math.max(e-s,1)*dw;const l=s*dw;const st=STATUTS[a.statut];const cc=catColors[a.categorie]||"#818cf8";
+        const w=Math.max(e-s,1)*dw;const l=s*dw;const st=STATUTS[a.statut];const cc=CAT_COLORS[a.categorie]||"#818cf8";const late=isLate(a);
         return(<div key={a.id} style={{display:"flex",borderBottom:"1px solid rgba(255,255,255,0.03)",background:i%2===0?"transparent":"rgba(255,255,255,0.008)"}}>
           <div onClick={()=>onEdit(a)} style={{width:"300px",minWidth:"300px",padding:"8px 14px",borderRight:"1px solid rgba(255,255,255,0.04)",display:"flex",flexDirection:"column",justifyContent:"center",cursor:"pointer",gap:"4px"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.02)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
             <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+              {late&&<span style={{fontSize:"10px"}}>⚠️</span>}
               <span style={{fontSize:"9px",fontWeight:600,padding:"2px 7px",borderRadius:"4px",background:`${cc}15`,color:cc}}>{a.categorie}</span>
-              <span style={{fontSize:"11px",fontWeight:600,color:"#e2e8f0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{a.action}</span>
+              <span style={{fontSize:"11px",fontWeight:600,color:late?"#fca5a5":"#e2e8f0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{a.action}</span>
             </div>
             <RespChips list={a.responsables}/>
           </div>
           <div style={{flex:1,position:"relative",height:rh}}>
             {days.map((d,di)=>(d.getDay()===0||d.getDay()===6)?<div key={di} style={{position:"absolute",left:di*dw,top:0,width:dw,height:"100%",background:"rgba(0,0,0,0.08)"}}/>:null)}
             {tOff>=0&&tOff<=td&&<div style={{position:"absolute",left:tOff*dw+dw/2-1,top:0,width:"2px",height:"100%",background:"rgba(129,140,248,0.3)",zIndex:2}}/>}
-            <div onClick={()=>onEdit(a)} style={{position:"absolute",left:l+3,top:"50%",transform:"translateY(-50%)",width:Math.max(w-6,20),height:"26px",borderRadius:"7px",background:`linear-gradient(135deg,${cc}25,${cc}10)`,border:`1px solid ${cc}40`,display:"flex",alignItems:"center",paddingLeft:"8px",gap:"5px",cursor:"pointer",transition:"all 0.2s",zIndex:3,overflow:"hidden"}} onMouseEnter={e=>{e.currentTarget.style.borderColor=cc;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=cc+"40";}}>
+            <div onClick={()=>onEdit(a)} style={{position:"absolute",left:l+3,top:"50%",transform:"translateY(-50%)",width:Math.max(w-6,20),height:"26px",borderRadius:"7px",background:late?`linear-gradient(135deg,rgba(239,68,68,0.25),rgba(239,68,68,0.1))`:`linear-gradient(135deg,${cc}25,${cc}10)`,border:`1px solid ${late?"rgba(239,68,68,0.4)":cc+"40"}`,display:"flex",alignItems:"center",paddingLeft:"8px",gap:"5px",cursor:"pointer",transition:"all 0.2s",zIndex:3,overflow:"hidden"}} onMouseEnter={e=>{e.currentTarget.style.borderColor=late?"#ef4444":cc;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=late?"rgba(239,68,68,0.4)":cc+"40";}}>
               <span style={{width:"5px",height:"5px",borderRadius:"50%",background:st.color,flexShrink:0}}/><span style={{fontSize:"9px",fontWeight:600,color:"#e2e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.action}</span>
             </div>
           </div>
@@ -249,7 +469,7 @@ function App(){
   const[actions,setActions]=useState([]);
   const[loading,setLoading]=useState(true);
   const[online,setOnline]=useState(true);
-  const[vue,setVue]=useState("liste");
+  const[vue,setVue]=useState("dashboard");
   const[fCat,setFCat]=useState("Tous");const[fStat,setFStat]=useState("tous");
   const[expId,setExpId]=useState(null);
   const[modal,setModal]=useState(false);const[editing,setEditing]=useState(null);
@@ -268,6 +488,7 @@ function App(){
   const onSave=t=>{const ex=actions.find(a=>a.id===t.id);upd(ex?actions.map(a=>a.id===t.id?normalizeAction(t):a):[...actions,normalizeAction(t)]);setModal(false);setEditing(null);};
   const onDel=id=>{upd(actions.filter(a=>a.id!==id));setModal(false);setEditing(null);};
   const cycle=id=>{const o=["a_faire","en_cours","fait","bloque"];upd(actions.map(a=>a.id!==id?a:{...a,statut:o[(o.indexOf(a.statut)+1)%4]}));};
+  const setStatus=(id,statut)=>upd(actions.map(a=>a.id===id?{...a,statut}:a));
   const edit=t=>{setEditing(normalizeAction(t));setModal(true);};
   const mv=(id,d)=>{const i=actions.findIndex(a=>a.id===id);const t=i+d;if(t<0||t>=actions.length)return;const n=[...actions];[n[i],n[t]]=[n[t],n[i]];upd(n);};
   const drop=col=>{if(dragId)upd(actions.map(a=>a.id===dragId?{...a,statut:col}:a));setDragId(null);setDragCol(null);};
@@ -280,8 +501,7 @@ function App(){
     if(fStat!=="tous"&&a.statut!==fStat)return false;
     return true;
   });
-  const stats={total:actions.length,fait:actions.filter(a=>a.statut==="fait").length,ec:actions.filter(a=>a.statut==="en_cours").length,crit:actions.filter(a=>a.priorite==="critique"&&a.statut!=="fait").length};
-  const pct=stats.total>0?Math.round((stats.fait/stats.total)*100):0;
+  const lateCount=actions.filter(isLate).length;
   const sCols=["a_faire","en_cours","fait","bloque"];
 
   if(loading)return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",flexDirection:"column",gap:"16px"}}><div style={{width:"40px",height:"40px",border:"3px solid rgba(129,140,248,0.2)",borderTopColor:"#818cf8",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><p style={{color:"#818cf8",fontSize:"14px"}}>Connexion...</p><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>);
@@ -291,7 +511,7 @@ function App(){
       <div style={{position:"absolute",top:"-15%",right:"-8%",width:"700px",height:"700px",background:"radial-gradient(circle,rgba(99,102,241,0.04) 0%,transparent 60%)",borderRadius:"50%"}}/>
       <div style={{position:"absolute",bottom:"-8%",left:"-4%",width:"500px",height:"500px",background:"radial-gradient(circle,rgba(56,189,248,0.03) 0%,transparent 60%)",borderRadius:"50%"}}/>
     </div>
-    <div style={{position:"relative",zIndex:1,maxWidth:"1350px",margin:"0 auto",padding:"26px 22px"}}>
+    <div style={{position:"relative",zIndex:1,maxWidth:"1400px",margin:"0 auto",padding:"26px 22px"}}>
 
       {/* Header */}
       <div style={{opacity:mt?1:0,transform:mt?"translateY(0)":"translateY(-14px)",transition:"all 0.6s",marginBottom:"22px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"14px"}}>
@@ -300,9 +520,10 @@ function App(){
             <div style={{width:"6px",height:"6px",borderRadius:"50%",background:"#818cf8"}}/>
             <span style={{fontSize:"10px",fontWeight:500,letterSpacing:"2.5px",textTransform:"uppercase",color:"#818cf8"}}>SUIVI D'ACTIONS</span>
             <SyncStatus online={online}/>
+            {lateCount>0&&<span style={{fontSize:"10px",fontWeight:600,padding:"2px 8px",borderRadius:"10px",background:"rgba(239,68,68,0.15)",color:"#fca5a5"}}>⚠️ {lateCount} en retard</span>}
           </div>
           <h1 style={{fontFamily:"'Fraunces',serif",fontSize:"clamp(24px,3.2vw,34px)",fontWeight:600,margin:"3px 0",lineHeight:1.15,color:"#f1f5f9"}}>POC EAM — SAP</h1>
-          <p style={{color:"#475569",fontSize:"11px"}}>{new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</p>
+          <p style={{color:"#475569",fontSize:"11px"}}>{new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
         </div>
         <div style={{display:"flex",gap:"6px",flexWrap:"wrap",alignItems:"center"}}>
           <Btn onClick={()=>setImpOpen(true)} style={{fontSize:"11px",padding:"7px 13px",background:"rgba(16,185,129,0.12)",border:"1px solid rgba(16,185,129,0.3)",color:"#6ee7b7"}}>📋 Import CR</Btn>
@@ -313,60 +534,50 @@ function App(){
         </div>
       </div>
 
-      {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:"8px",marginBottom:"18px"}}>
-        {[{l:"Total",v:stats.total,c:"#818cf8",s:"actions"},{l:"Terminées",v:stats.fait,c:"#10b981",s:`${pct}%`},{l:"En cours",v:stats.ec,c:"#60a5fa",s:"actives"},{l:"Critiques",v:stats.crit,c:"#ef4444",s:"ouvertes"}].map((s,i)=>
-          <div key={i} style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",borderRadius:"10px",padding:"13px 15px"}}>
-            <div style={{fontSize:"9px",textTransform:"uppercase",letterSpacing:"2px",color:"#525d6e",marginBottom:"5px",fontWeight:500}}>{s.l}</div>
-            <div style={{display:"flex",alignItems:"baseline",gap:"4px"}}><span style={{fontSize:"22px",fontWeight:600,color:s.c}}>{s.v}</span><span style={{fontSize:"10px",color:"#475569"}}>{s.s}</span></div>
-          </div>
-        )}
-      </div>
-
-      {/* Progress */}
-      <div style={{marginBottom:"20px",background:"rgba(255,255,255,0.02)",borderRadius:"8px",padding:"12px 16px",border:"1px solid rgba(255,255,255,0.04)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:"6px"}}><span style={{fontSize:"10px",fontWeight:600,color:"#94a3b8",letterSpacing:"1px",textTransform:"uppercase"}}>Progression</span><span style={{fontSize:"12px",fontWeight:600,color:"#818cf8"}}>{pct}%</span></div>
-        <div style={{height:"4px",background:"rgba(255,255,255,0.05)",borderRadius:"2px",overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,borderRadius:"2px",background:"linear-gradient(90deg,#818cf8,#38bdf8,#34d399)",transition:"width 0.6s ease"}}/></div>
-      </div>
-
-      {/* FILTERS */}
+      {/* Navigation */}
       <div style={{display:"flex",flexWrap:"wrap",gap:"12px",marginBottom:"20px"}}>
         <div className="filter-group">
           <span className="filter-label">Vue</span>
           <div style={{display:"flex",gap:"4px"}}>
-            {[{k:"liste",l:"☰ Liste"},{k:"kanban",l:"▦ Kanban"},{k:"timeline",l:"◫ Timeline"}].map(v=>
+            {[{k:"dashboard",l:"📊 Dashboard"},{k:"liste",l:"☰ Liste"},{k:"kanban",l:"▦ Kanban"},{k:"timeline",l:"◫ Timeline"}].map(v=>
               <button key={v.k} onClick={()=>setVue(v.k)} style={{padding:"6px 12px",fontSize:"11px",fontWeight:600,border:"none",cursor:"pointer",borderRadius:"6px",background:vue===v.k?"rgba(129,140,248,0.2)":"transparent",color:vue===v.k?"#c7d2fe":"#525d6e",transition:"all 0.15s"}}>{v.l}</button>
             )}
           </div>
         </div>
-        <div className="filter-group">
-          <span className="filter-label" style={{color:"#60a5fa"}}>Statut</span>
-          <div style={{display:"flex",gap:"4px",flexWrap:"wrap"}}>
-            <button onClick={()=>setFStat("tous")} style={{padding:"5px 10px",fontSize:"10px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"5px",background:fStat==="tous"?"rgba(96,165,250,0.2)":"transparent",color:fStat==="tous"?"#93c5fd":"#525d6e"}}>Tous</button>
-            {Object.entries(STATUTS).map(([k,v])=><button key={k} onClick={()=>setFStat(k)} style={{padding:"5px 10px",fontSize:"10px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"5px",background:fStat===k?v.bg:"transparent",color:fStat===k?v.color:"#525d6e"}}>{v.label}</button>)}
+        {vue!=="dashboard"&&(<>
+          <div className="filter-group">
+            <span className="filter-label" style={{color:"#60a5fa"}}>Statut</span>
+            <div style={{display:"flex",gap:"4px",flexWrap:"wrap"}}>
+              <button onClick={()=>setFStat("tous")} style={{padding:"5px 10px",fontSize:"10px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"5px",background:fStat==="tous"?"rgba(96,165,250,0.2)":"transparent",color:fStat==="tous"?"#93c5fd":"#525d6e"}}>Tous</button>
+              {Object.entries(STATUTS).map(([k,v])=><button key={k} onClick={()=>setFStat(k)} style={{padding:"5px 10px",fontSize:"10px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"5px",background:fStat===k?v.bg:"transparent",color:fStat===k?v.color:"#525d6e"}}>{v.label}</button>)}
+            </div>
           </div>
-        </div>
-        <div className="filter-group">
-          <span className="filter-label" style={{color:"#fbbf24"}}>Catégorie</span>
-          <div style={{display:"flex",gap:"4px",flexWrap:"wrap"}}>
-            <button onClick={()=>setFCat("Tous")} style={{padding:"5px 10px",fontSize:"10px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"5px",background:fCat==="Tous"?"rgba(251,191,36,0.15)":"transparent",color:fCat==="Tous"?"#fcd34d":"#525d6e"}}>Toutes</button>
-            {CATS.map(c=><button key={c} onClick={()=>setFCat(c)} style={{padding:"5px 10px",fontSize:"10px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"5px",background:fCat===c?"rgba(251,191,36,0.15)":"transparent",color:fCat===c?"#fcd34d":"#525d6e"}}>{c}</button>)}
+          <div className="filter-group">
+            <span className="filter-label" style={{color:"#fbbf24"}}>Catégorie</span>
+            <div style={{display:"flex",gap:"4px",flexWrap:"wrap"}}>
+              <button onClick={()=>setFCat("Tous")} style={{padding:"5px 10px",fontSize:"10px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"5px",background:fCat==="Tous"?"rgba(251,191,36,0.15)":"transparent",color:fCat==="Tous"?"#fcd34d":"#525d6e"}}>Toutes</button>
+              {CATS.map(c=><button key={c} onClick={()=>setFCat(c)} style={{padding:"5px 10px",fontSize:"10px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"5px",background:fCat===c?"rgba(251,191,36,0.15)":"transparent",color:fCat===c?"#fcd34d":"#525d6e"}}>{c}</button>)}
+            </div>
           </div>
-        </div>
+        </>)}
       </div>
+
+      {/* DASHBOARD */}
+      {vue==="dashboard"&&<DashboardView actions={actions} onEdit={edit} onStatusChange={setStatus}/>}
 
       {/* LIST */}
       {vue==="liste"&&<div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
-        {filtered.map((a,i)=>{const isX=expId===a.id;const st=STATUTS[a.statut];const pr=PRIOS[a.priorite];
-          return(<div key={a.id} style={{background:"rgba(255,255,255,0.02)",border:`1px solid ${isX?"rgba(129,140,248,0.15)":"rgba(255,255,255,0.04)"}`,borderRadius:"10px",overflow:"hidden",transition:"all 0.2s"}}>
+        {filtered.map((a,i)=>{const isX=expId===a.id;const st=STATUTS[a.statut];const pr=PRIOS[a.priorite];const late=isLate(a);
+          return(<div key={a.id} style={{background:late?"rgba(239,68,68,0.03)":"rgba(255,255,255,0.02)",border:`1px solid ${late?"rgba(239,68,68,0.15)":isX?"rgba(129,140,248,0.15)":"rgba(255,255,255,0.04)"}`,borderRadius:"10px",overflow:"hidden",transition:"all 0.2s"}}>
             <div style={{display:"flex",alignItems:"stretch"}}>
-              <div style={{width:"4px",background:st.color,flexShrink:0}}/>
+              <div style={{width:"4px",background:late?"#ef4444":st.color,flexShrink:0}}/>
               <div style={{flex:1,padding:"11px 14px",cursor:"pointer",display:"flex",flexDirection:"column",gap:"6px"}} onClick={()=>setExpId(isX?null:a.id)}>
                 <div style={{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}}>
+                  {late&&<span style={{fontSize:"9px",fontWeight:600,padding:"2px 6px",borderRadius:"4px",background:"rgba(239,68,68,0.15)",color:"#fca5a5"}}>⚠️ -{daysLate(a)}j</span>}
                   <span style={{fontSize:"9px",fontWeight:600,color:pr.color}}>{pr.icon} {pr.label}</span>
                   <span style={{fontSize:"9px",fontWeight:600,padding:"2px 7px",borderRadius:"4px",background:"rgba(129,140,248,0.06)",color:"#a5b4fc"}}>{a.categorie}</span>
                 </div>
-                <div style={{fontSize:"13px",fontWeight:600,color:"#e2e8f0",lineHeight:1.3}}>{a.action}</div>
+                <div style={{fontSize:"13px",fontWeight:600,color:late?"#fca5a5":"#e2e8f0",lineHeight:1.3}}>{a.action}</div>
                 <div style={{display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
                   <RespChips list={a.responsables}/>
                   <span style={{fontSize:"10px",color:"#475569"}}>📅 {new Date(a.dateDebut).toLocaleDateString("fr-FR")} → {new Date(a.dateFin).toLocaleDateString("fr-FR")}</span>
@@ -402,10 +613,11 @@ function App(){
               <span style={{fontSize:"10px",fontWeight:700,padding:"3px 8px",borderRadius:"5px",background:st.bg,color:st.color}}>{items.length}</span>
             </div>
             <div style={{padding:"8px",display:"flex",flexDirection:"column",gap:"6px",minHeight:"100px"}}>
-              {items.map(a=>{const pr=PRIOS[a.priorite];
+              {items.map(a=>{const pr=PRIOS[a.priorite];const late=isLate(a);
                 return(<div key={a.id} draggable onDragStart={()=>setDragId(a.id)} onDragEnd={()=>{setDragId(null);setDragCol(null);}}
-                  style={{padding:"12px",borderRadius:"10px",background:dragId===a.id?"rgba(129,140,248,0.06)":"rgba(255,255,255,0.02)",border:`1px solid ${dragId===a.id?"rgba(129,140,248,0.15)":"rgba(255,255,255,0.04)"}`,cursor:"grab",borderLeft:`3px solid ${st.color}`,opacity:dragId===a.id?0.4:1}}>
-                  <div style={{fontSize:"12px",fontWeight:600,color:"#e2e8f0",marginBottom:"8px",lineHeight:1.35}}>{a.action}</div>
+                  style={{padding:"12px",borderRadius:"10px",background:late?"rgba(239,68,68,0.05)":dragId===a.id?"rgba(129,140,248,0.06)":"rgba(255,255,255,0.02)",border:`1px solid ${late?"rgba(239,68,68,0.15)":dragId===a.id?"rgba(129,140,248,0.15)":"rgba(255,255,255,0.04)"}`,cursor:"grab",borderLeft:`3px solid ${late?"#ef4444":st.color}`,opacity:dragId===a.id?0.4:1}}>
+                  {late&&<div style={{fontSize:"9px",fontWeight:600,padding:"2px 6px",borderRadius:"4px",background:"rgba(239,68,68,0.15)",color:"#fca5a5",marginBottom:"6px",display:"inline-block"}}>⚠️ -{daysLate(a)}j</div>}
+                  <div style={{fontSize:"12px",fontWeight:600,color:late?"#fca5a5":"#e2e8f0",marginBottom:"8px",lineHeight:1.35}}>{a.action}</div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:"5px",marginBottom:"8px"}}>
                     <span style={{fontSize:"9px",fontWeight:600,padding:"2px 7px",borderRadius:"4px",background:"rgba(129,140,248,0.06)",color:"#a5b4fc"}}>{a.categorie}</span>
                     <span style={{fontSize:"9px",color:pr.color,fontWeight:600}}>{pr.icon}</span>
