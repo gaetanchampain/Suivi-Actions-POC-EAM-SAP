@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POC EAM — SAP · Suivi d'actions</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📋</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: linear-gradient(160deg, #0b0e18 0%, #10141f 40%, #0d1117 100%); font-family: 'Outfit', -apple-system, sans-serif; color: #e2e8f0; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+  @keyframes pulse { 0%, 100% { opacity:1; transform:scale(1); } 50% { opacity:0.5; transform:scale(0.8); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const STORAGE_KEY = "poc-eam-sap-v1";
+
+const INITIAL_ACTIONS = [
+  { id:"a1", action:"Confirmer le dispositif SAP", detail:"Point focal, staffing, modalités de contact « value prototyping ». Donner de la visibilité sur l'organisation et les interlocuteurs.", responsables:["SAP (Thomas)"], dateDebut:"2025-02-03", dateFin:"2025-02-07", priorite:"haute", statut:"en_cours", categorie:"SAP" },
+  { id:"a2", action:"Partager un RETEX client comparable", detail:"Recherche d'entreprises similaires (taille/industrie) pour crédibiliser la démarche auprès du métier.", responsables:["SAP (Thomas)"], dateDebut:"2025-02-03", dateFin:"2025-02-10", priorite:"haute", statut:"en_cours", categorie:"SAP" },
+  { id:"a3", action:"Consolider les cas d'usage / user stories par module", detail:"Compiler les initiatives, formaliser des histoires « bout en bout ».", responsables:["Gaëtan","Sonia"], dateDebut:"2025-02-10", dateFin:"2025-02-14", priorite:"haute", statut:"en_cours", categorie:"Pilote" },
+  { id:"a4", action:"Définir les critères de succès du POC (GO / NO GO)", detail:"Éviter dérive de périmètre et subjectivité en fin de POC.", responsables:["Arnaud","David"], dateDebut:"2025-02-10", dateFin:"2025-02-12", priorite:"haute", statut:"en_cours", categorie:"Architecte" },
+  { id:"a5", action:"Caler les créneaux démos + ateliers", detail:"Anticiper la disponibilité des populations (planif vs PPM).", responsables:["Gaëtan"], dateDebut:"2025-02-03", dateFin:"2025-02-06", priorite:"critique", statut:"en_cours", categorie:"Pilote" },
+  { id:"a6", action:"Clarifier le paramétrage BTP et activation géospatiale", detail:"Préparer les gestes techniques non encore réalisés (pré-requis).", responsables:["Gaël"], dateDebut:"2025-02-10", dateFin:"2025-02-21", priorite:"haute", statut:"en_cours", categorie:"Architecte" },
+  { id:"a7", action:"Clarifier la mobilisation Sopra Steria", detail:"Rôle, modalités, contractualisation. Point sensible : besoin potentiel de consultants pour configuration/adaptation.", responsables:["SAP (Thomas)"], dateDebut:"2025-02-03", dateFin:"2025-02-10", priorite:"moyenne", statut:"en_cours", categorie:"SAP" },
+  { id:"a8", action:"Préparer liste de features par module", detail:"Support pour aligner process métier vs capacités solution.", responsables:["Arnaud","David"], dateDebut:"2025-02-10", dateFin:"2025-02-14", priorite:"moyenne", statut:"en_cours", categorie:"Architecte" },
+  { id:"a9", action:"Définir les collectifs Planification et Programmation", detail:"Constituer ces collectifs avec les EO, Archi, AF et le PM.", responsables:[], dateDebut:"2025-02-10", dateFin:"2025-02-14", priorite:"haute", statut:"fait", categorie:"Pilote" },
+  { id:"a10", action:"Communiquer la priorisation des scénarios EAM", detail:"Clarifier que les phases d'instruction seront menées en priorité sur les scénarios EAM.", responsables:[], dateDebut:"2025-02-03", dateFin:"2025-02-07", priorite:"haute", statut:"fait", categorie:"Pilote" },
+  { id:"a11", action:"Prendre contact avec SAP pour accès modules & démos POC", detail:"Préparer FSM et EPPM, organiser des démonstrations en vue des POC.", responsables:["Gaël Sœur"], dateDebut:"2025-02-03", dateFin:"2025-02-07", priorite:"critique", statut:"fait", categorie:"SAP" },
+  { id:"a12", action:"Sécuriser les achats en gré à gré avec SAP", detail:"Éviter le lancement d'un RFP. Valider la procédure d'achat.", responsables:["Nicolas Cossard"], dateDebut:"2025-02-03", dateFin:"2025-02-10", priorite:"moyenne", statut:"a_faire", categorie:"Pilote" },
+  { id:"a13", action:"Prendre contact avec Oxya (intégrateur potentiel)", detail:"Explorer le partenariat d'intégration pour la solution SAP.", responsables:["Gaël","Gaëtan"], dateDebut:"2025-02-10", dateFin:"2025-02-14", priorite:"haute", statut:"en_cours", categorie:"Pilote" },
+];
+
+const STATUTS = {
+  a_faire: { label:"À faire", color:"#64748b", bg:"rgba(100,116,139,0.15)" },
+  en_cours: { label:"En cours", color:"#60a5fa", bg:"rgba(96,165,250,0.12)" },
+  fait: { label:"Fait", color:"#10b981", bg:"rgba(16,185,129,0.15)" },
+  bloque: { label:"Bloqué", color:"#ef4444", bg:"rgba(239,68,68,0.15)" },
+};
+
+const PRIORITES = {
+  critique: { label:"Critique", color:"#ef4444", icon:"🔴" },
+  haute: { label:"Haute", color:"#f59e0b", icon:"🟠" },
+  moyenne: { label:"Moyenne", color:"#3b82f6", icon:"🔵" },
+};
+
+const CATEGORIES = ["Architecte","Data","EO","PM","SAP","Pilote"];
+
+const genId = () => "a" + Date.now() + Math.random().toString(36).slice(2,6);
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed) && parsed.length > 0) return parsed; }
+  } catch(e) {}
+  return INITIAL_ACTIONS;
+}
+
+function saveData(data) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) {}
+}
+
+// --- UI Components ---
+function Modal({ open, onClose, title, children }) {
+  if (!open) return null;
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={onClose}>
+      <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)" }} />
+      <div onClick={e=>e.stopPropagation()} style={{ position:"relative", width:"90%", maxWidth:"560px", maxHeight:"90vh", overflow:"auto", background:"#151a28", border:"1px solid rgba(255,255,255,0.07)", borderRadius:"16px", padding:"28px", boxShadow:"0 25px 60px rgba(0,0,0,0.5)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"22px" }}>
+          <h3 style={{ margin:0, fontSize:"18px", fontWeight:700, color:"#e2e8f0" }}>{title}</h3>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.06)", border:"none", color:"#94a3b8", width:"32px", height:"32px", borderRadius:"8px", cursor:"pointer", fontSize:"16px" }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FieldLabel({ children }) {
+  return <label style={{ display:"block", fontSize:"11px", fontWeight:600, letterSpacing:"1.2px", textTransform:"uppercase", color:"#818cf8", marginBottom:"6px" }}>{children}</label>;
+}
+
+function Input({ value, onChange, placeholder, type="text", style:s={}, onKeyDown }) {
+  return <input type={type} value={value} onChange={onChange} placeholder={placeholder} onKeyDown={onKeyDown} style={{ width:"100%", padding:"10px 14px", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"10px", color:"#e2e8f0", fontSize:"14px", outline:"none", boxSizing:"border-box", ...s }} />;
+}
+
+function Select({ value, onChange, children, style:s={} }) {
+  return <select value={value} onChange={onChange} style={{ width:"100%", padding:"10px 14px", background:"#151a28", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"10px", color:"#e2e8f0", fontSize:"14px", outline:"none", boxSizing:"border-box", ...s }}>{children}</select>;
+}
+
+function Btn({ onClick, children, variant="primary", style:s={} }) {
+  const styles = {
+    primary: { background:"rgba(129,140,248,0.15)", border:"1px solid rgba(129,140,248,0.3)", color:"#c7d2fe" },
+    danger: { background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.3)", color:"#fca5a5" },
+    ghost: { background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", color:"#94a3b8" },
+  };
+  return <button onClick={onClick} style={{ padding:"8px 18px", borderRadius:"10px", fontSize:"13px", fontWeight:600, cursor:"pointer", transition:"all 0.2s", ...styles[variant], ...s }}>{children}</button>;
+}
+
+// --- Task Form ---
+function TaskForm({ task, onSave, onCancel, onDelete }) {
+  const [form, setForm] = useState(task || {
+    id: genId(), action:"", detail:"", responsables:[], dateDebut: new Date().toISOString().slice(0,10),
+    dateFin: new Date(Date.now()+7*86400000).toISOString().slice(0,10),
+    priorite:"moyenne", statut:"a_faire", categorie:"PM",
+  });
+  const [newResp, setNewResp] = useState("");
+  const upd = (k,v) => setForm(p => ({...p, [k]:v}));
+  const addResp = () => { if(newResp.trim()){ upd("responsables",[...form.responsables, newResp.trim()]); setNewResp(""); }};
+  const removeResp = (i) => upd("responsables", form.responsables.filter((_,j)=>j!==i));
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <div><FieldLabel>Action</FieldLabel><Input value={form.action} onChange={e=>upd("action",e.target.value)} placeholder="Intitulé de l'action..." /></div>
+      <div><FieldLabel>Détail</FieldLabel>
+        <textarea value={form.detail} onChange={e=>upd("detail",e.target.value)} placeholder="Description détaillée..." style={{ width:"100%", minHeight:"80px", padding:"10px 14px", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"10px", color:"#e2e8f0", fontSize:"14px", outline:"none", resize:"vertical", fontFamily:"inherit", boxSizing:"border-box" }} />
+      </div>
+      <div>
+        <FieldLabel>Responsables</FieldLabel>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginBottom:"8px" }}>
+          {form.responsables.map((r,i)=>(
+            <span key={i} style={{ display:"inline-flex", alignItems:"center", gap:"6px", padding:"4px 12px", background:"rgba(99,102,241,0.15)", borderRadius:"8px", fontSize:"12px", color:"#a5b4fc" }}>
+              {r}<span onClick={()=>removeResp(i)} style={{ cursor:"pointer", opacity:0.7, fontSize:"14px" }}>×</span>
+            </span>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:"8px" }}>
+          <Input value={newResp} onChange={e=>setNewResp(e.target.value)} placeholder="Ajouter un responsable..." style={{ flex:1 }} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addResp();}}} />
+          <Btn onClick={addResp} variant="ghost" style={{ whiteSpace:"nowrap" }}>+ Ajouter</Btn>
+        </div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px" }}>
+        <div><FieldLabel>Date de début</FieldLabel><Input type="date" value={form.dateDebut} onChange={e=>upd("dateDebut",e.target.value)} /></div>
+        <div><FieldLabel>Date de fin</FieldLabel><Input type="date" value={form.dateFin} onChange={e=>upd("dateFin",e.target.value)} /></div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"12px" }}>
+        <div><FieldLabel>Priorité</FieldLabel><Select value={form.priorite} onChange={e=>upd("priorite",e.target.value)}>{Object.entries(PRIORITES).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</Select></div>
+        <div><FieldLabel>Statut</FieldLabel><Select value={form.statut} onChange={e=>upd("statut",e.target.value)}>{Object.entries(STATUTS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</Select></div>
+        <div><FieldLabel>Catégorie</FieldLabel><Select value={form.categorie} onChange={e=>upd("categorie",e.target.value)}>{CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</Select></div>
+      </div>
+      <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end", marginTop:"8px" }}>
+        {onDelete && <Btn variant="danger" onClick={()=>onDelete(form.id)}>🗑 Supprimer</Btn>}
+        <div style={{ flex:1 }} />
+        <Btn variant="ghost" onClick={onCancel}>Annuler</Btn>
+        <Btn variant="primary" onClick={()=>onSave(form)}>💾 Enregistrer</Btn>
+      </div>
+    </div>
+  );
+}
+
+// --- Timeline ---
+function TimelineView({ actions, onEdit }) {
+  const allDates = actions.flatMap(a=>[new Date(a.dateDebut), new Date(a.dateFin)]);
+  if (!allDates.length) return <div style={{ padding:"40px", textAlign:"center", color:"#475569" }}>Aucune action</div>;
+
+  const minDate = new Date(Math.min(...allDates)); const maxDate = new Date(Math.max(...allDates));
+  minDate.setDate(minDate.getDate()-2); maxDate.setDate(maxDate.getDate()+3);
+  const totalDays = Math.ceil((maxDate-minDate)/86400000);
+  const dayWidth = 48; const rowHeight = 52;
+
+  const days = [];
+  for(let i=0;i<=totalDays;i++){ const d=new Date(minDate); d.setDate(d.getDate()+i); days.push(d); }
+
+  const weeks = []; let cw = null;
+  days.forEach((d,i)=>{
+    const wn = getWeek(d); const key = d.getFullYear()+"-W"+wn;
+    if(!cw||cw.key!==key){ cw={key, start:i, label:"S"+wn, days:1}; weeks.push(cw); } else { cw.days++; }
+  });
+
+  function getWeek(d){ const dt=new Date(d); dt.setHours(0,0,0,0); dt.setDate(dt.getDate()+3-((dt.getDay()+6)%7)); const w1=new Date(dt.getFullYear(),0,4); return 1+Math.round(((dt-w1)/86400000-3+((w1.getDay()+6)%7))/7); }
+
+  const sorted = [...actions].sort((a,b)=>new Date(a.dateDebut)-new Date(b.dateDebut));
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayOff = Math.ceil((today-minDate)/86400000);
+
+  return (
+    <div style={{ overflowX:"auto", borderRadius:"14px", border:"1px solid rgba(255,255,255,0.06)", background:"rgba(255,255,255,0.02)" }}>
+      <div style={{ minWidth: totalDays*dayWidth+280 }}>
+        <div style={{ display:"flex", position:"sticky", top:0, zIndex:10, background:"#10141f" }}>
+          <div style={{ width:"280px", minWidth:"280px", padding:"10px 16px", borderBottom:"1px solid rgba(255,255,255,0.08)", borderRight:"1px solid rgba(255,255,255,0.06)", display:"flex", alignItems:"flex-end" }}>
+            <span style={{ fontSize:"11px", fontWeight:700, color:"#64748b", letterSpacing:"1.5px", textTransform:"uppercase" }}>Action</span>
+          </div>
+          <div style={{ flex:1 }}>
+            <div style={{ display:"flex", borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+              {weeks.map(w=><div key={w.key} style={{ width:w.days*dayWidth, minWidth:w.days*dayWidth, padding:"6px 0", textAlign:"center", fontSize:"11px", fontWeight:700, color:"#818cf8", letterSpacing:"1px", borderRight:"1px solid rgba(255,255,255,0.04)" }}>{w.label}</div>)}
+            </div>
+            <div style={{ display:"flex", borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
+              {days.map((d,i)=>{
+                const isWe = d.getDay()===0||d.getDay()===6;
+                const isToday = d.toDateString()===today.toDateString();
+                return <div key={i} style={{ width:dayWidth, minWidth:dayWidth, padding:"4px 0", textAlign:"center", fontSize:"10px", fontWeight:isToday?700:500, color:isToday?"#6366f1":isWe?"#334155":"#475569", background:isToday?"rgba(99,102,241,0.08)":isWe?"rgba(0,0,0,0.15)":"transparent", borderRight:"1px solid rgba(255,255,255,0.03)" }}>{d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"}).replace(".","")}</div>;
+              })}
+            </div>
+          </div>
+        </div>
+        {sorted.map((a,i)=>{
+          const start = Math.max(0,Math.ceil((new Date(a.dateDebut)-minDate)/86400000));
+          const end = Math.ceil((new Date(a.dateFin)-minDate)/86400000);
+          const w = Math.max(end-start,1)*dayWidth; const l = start*dayWidth;
+          const pr = PRIORITES[a.priorite]; const st = STATUTS[a.statut];
+          return (
+            <div key={a.id} style={{ display:"flex", borderBottom:"1px solid rgba(255,255,255,0.04)", background:i%2===0?"transparent":"rgba(255,255,255,0.01)" }}>
+              <div onClick={()=>onEdit(a)} style={{ width:"280px", minWidth:"280px", padding:"10px 16px", borderRight:"1px solid rgba(255,255,255,0.06)", display:"flex", flexDirection:"column", justifyContent:"center", cursor:"pointer" }}
+                onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.03)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                <div style={{ fontSize:"12px", fontWeight:600, color:"#e2e8f0", lineHeight:1.3, marginBottom:"3px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.action}</div>
+                <div style={{ fontSize:"10px", color:"#475569" }}>{a.responsables.join(", ")}</div>
+              </div>
+              <div style={{ flex:1, position:"relative", height:rowHeight }}>
+                {days.map((d,di)=>{ const isWe=d.getDay()===0||d.getDay()===6; return isWe?<div key={di} style={{ position:"absolute", left:di*dayWidth, top:0, width:dayWidth, height:"100%", background:"rgba(0,0,0,0.1)" }} />:null; })}
+                {todayOff>=0&&todayOff<=totalDays&&<div style={{ position:"absolute", left:todayOff*dayWidth+dayWidth/2-1, top:0, width:"2px", height:"100%", background:"rgba(99,102,241,0.4)", zIndex:2 }} />}
+                <div onClick={()=>onEdit(a)} style={{ position:"absolute", left:l+4, top:"50%", transform:"translateY(-50%)", width:Math.max(w-8,20), height:"28px", borderRadius:"8px", background:`linear-gradient(135deg, ${pr.color}30, ${pr.color}15)`, border:`1px solid ${pr.color}50`, display:"flex", alignItems:"center", paddingLeft:"10px", gap:"6px", cursor:"pointer", transition:"all 0.2s", zIndex:3, overflow:"hidden" }}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=pr.color;e.currentTarget.style.boxShadow=`0 0 12px ${pr.color}30`;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=pr.color+"50";e.currentTarget.style.boxShadow="none";}}>
+                  <span style={{ width:"6px", height:"6px", borderRadius:"50%", background:st.color, flexShrink:0 }} />
+                  <span style={{ fontSize:"10px", fontWeight:600, color:"#e2e8f0", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{a.action}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// --- Import CR Modal ---
+function ImportCRModal({ open, onClose, onImport, existingActions }) {
+  const [raw, setRaw] = useState("");
+  const [parsed, setParsed] = useState([]);
+  const [selected, setSelected] = useState({});
+  const [error, setError] = useState("");
+  const [step, setStep] = useState("paste"); // paste | preview
+
+  const reset = () => { setRaw(""); setParsed([]); setSelected({}); setError(""); setStep("paste"); };
+
+  const parseInput = () => {
+    setError("");
+    let text = raw.trim();
+    // Try to extract json_actions block
+    let jsonStr = text;
+    const blockMatch = text.match(/```json_actions\s*([\s\S]*?)```/);
+    if (blockMatch) { jsonStr = blockMatch[1].trim(); }
+    else {
+      // Try plain JSON array
+      const arrMatch = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (arrMatch) { jsonStr = arrMatch[0]; }
+    }
+    try {
+      const data = JSON.parse(jsonStr);
+      if (!Array.isArray(data) || data.length === 0) { setError("Le JSON doit être un tableau non vide."); return; }
+      const valid = data.map((item, i) => {
+        if (!item.action) throw new Error(`Action #${i+1} : champ "action" manquant`);
+        return {
+          id: genId(),
+          action: item.action || "",
+          detail: item.detail || "",
+          responsables: Array.isArray(item.responsables) ? item.responsables : (item.responsable ? [item.responsable] : []),
+          dateDebut: item.dateDebut || new Date().toISOString().slice(0,10),
+          dateFin: item.dateFin || new Date(Date.now()+7*86400000).toISOString().slice(0,10),
+          priorite: ["critique","haute","moyenne"].includes(item.priorite) ? item.priorite : "moyenne",
+          statut: "a_faire",
+          categorie: CATEGORIES.includes(item.categorie) ? item.categorie : "PM",
+        };
+      });
+      // Check duplicates
+      const existingTitles = new Set(existingActions.map(a => a.action.toLowerCase().trim()));
+      const sel = {};
+      valid.forEach(a => { sel[a.id] = !existingTitles.has(a.action.toLowerCase().trim()); });
+      setParsed(valid);
+      setSelected(sel);
+      setStep("preview");
+    } catch(e) {
+      setError("Erreur de parsing : " + e.message);
+    }
+  };
+
+  const toggleSelect = (id) => setSelected(p => ({...p, [id]: !p[id]}));
+  const selectAll = () => { const s={}; parsed.forEach(a=>{s[a.id]=true;}); setSelected(s); };
+  const selectNone = () => { const s={}; parsed.forEach(a=>{s[a.id]=false;}); setSelected(s); };
+
+  const doImport = () => {
+    const toImport = parsed.filter(a => selected[a.id]);
+    if (toImport.length > 0) onImport(toImport);
+    reset(); onClose();
+  };
+
+  const selectedCount = parsed.filter(a => selected[a.id]).length;
+
+  if (!open) return null;
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={()=>{reset();onClose();}}>
+      <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)" }} />
+      <div onClick={e=>e.stopPropagation()} style={{ position:"relative", width:"92%", maxWidth:"700px", maxHeight:"90vh", overflow:"auto", background:"#151a28", border:"1px solid rgba(255,255,255,0.07)", borderRadius:"16px", padding:"28px", boxShadow:"0 25px 60px rgba(0,0,0,0.5)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"18px" }}>
+          <h3 style={{ margin:0, fontSize:"18px", fontWeight:700, color:"#e2e8f0" }}>📋 Import depuis Compte-Rendu</h3>
+          <button onClick={()=>{reset();onClose();}} style={{ background:"rgba(255,255,255,0.06)", border:"none", color:"#94a3b8", width:"32px", height:"32px", borderRadius:"8px", cursor:"pointer", fontSize:"16px" }}>✕</button>
+        </div>
+
+        {step === "paste" && (
+          <div>
+            <p style={{ fontSize:"13px", color:"#94a3b8", marginBottom:"14px", lineHeight:1.5 }}>
+              Collez le bloc <code style={{ background:"rgba(99,102,241,0.15)", padding:"2px 6px", borderRadius:"4px", color:"#a5b4fc", fontSize:"12px" }}>json_actions</code> généré par le CR, ou un tableau JSON d'actions.
+            </p>
+            <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder={'Collez ici le JSON...\n\nExemple :\n[\n  {\n    "action": "Valider le périmètre",\n    "detail": "...",\n    "responsables": ["Gaëtan"],\n    "dateDebut": "2025-02-10",\n    "dateFin": "2025-02-14",\n    "priorite": "haute",\n    "categorie": "PM"\n  }\n]'}
+              style={{ width:"100%", minHeight:"220px", padding:"14px", background:"rgba(0,0,0,0.25)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"12px", color:"#e2e8f0", fontSize:"13px", fontFamily:"'Courier New', monospace", outline:"none", resize:"vertical", boxSizing:"border-box", lineHeight:1.5 }} />
+            {error && <div style={{ marginTop:"10px", padding:"10px 14px", background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:"8px", fontSize:"12px", color:"#fca5a5" }}>⚠️ {error}</div>}
+            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end", marginTop:"16px" }}>
+              <Btn variant="ghost" onClick={()=>{reset();onClose();}}>Annuler</Btn>
+              <Btn variant="primary" onClick={parseInput}>Analyser →</Btn>
+            </div>
+          </div>
+        )}
+
+        {step === "preview" && (
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
+              <p style={{ fontSize:"13px", color:"#94a3b8", margin:0 }}>
+                <strong style={{ color:"#10b981" }}>{parsed.length}</strong> actions détectées · <strong style={{ color:"#818cf8" }}>{selectedCount}</strong> sélectionnées
+              </p>
+              <div style={{ display:"flex", gap:"6px" }}>
+                <button onClick={selectAll} style={{ fontSize:"11px", background:"none", border:"none", color:"#818cf8", cursor:"pointer", textDecoration:"underline" }}>Tout</button>
+                <button onClick={selectNone} style={{ fontSize:"11px", background:"none", border:"none", color:"#64748b", cursor:"pointer", textDecoration:"underline" }}>Aucun</button>
+              </div>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:"6px", maxHeight:"400px", overflow:"auto" }}>
+              {parsed.map(a => {
+                const pr = PRIORITES[a.priorite]; const isDupe = !selected[a.id] && existingActions.some(ex => ex.action.toLowerCase().trim() === a.action.toLowerCase().trim());
+                return (
+                  <div key={a.id} onClick={()=>toggleSelect(a.id)} style={{
+                    padding:"12px 14px", borderRadius:"10px", cursor:"pointer", transition:"all 0.2s",
+                    background: selected[a.id] ? "rgba(99,102,241,0.08)" : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${selected[a.id] ? "rgba(99,102,241,0.25)" : "rgba(255,255,255,0.06)"}`,
+                    opacity: selected[a.id] ? 1 : 0.5,
+                  }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                      <div style={{ width:"20px", height:"20px", borderRadius:"6px", border:`2px solid ${selected[a.id]?"#6366f1":"#475569"}`, background:selected[a.id]?"#6366f1":"transparent", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"12px", color:"white", flexShrink:0 }}>
+                        {selected[a.id] && "✓"}
+                      </div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap", marginBottom:"4px" }}>
+                          <span style={{ fontSize:"9px", fontWeight:600, color:pr.color }}>{pr.icon} {pr.label}</span>
+                          <span style={{ fontSize:"9px", fontWeight:600, padding:"2px 7px", borderRadius:"4px", background:"rgba(129,140,248,0.08)", color:"#a5b4fc" }}>{a.categorie}</span>
+                          {isDupe && <span style={{ fontSize:"9px", fontWeight:600, padding:"2px 7px", borderRadius:"4px", background:"rgba(245,158,11,0.15)", color:"#f59e0b" }}>⚠ Doublon possible</span>}
+                        </div>
+                        <div style={{ fontSize:"13px", fontWeight:600, color:"#e2e8f0", marginBottom:"3px" }}>{a.action}</div>
+                        <div style={{ fontSize:"11px", color:"#475569" }}>
+                          👤 {a.responsables.join(", ")} · 📅 {a.dateDebut} → {a.dateFin}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end", marginTop:"16px" }}>
+              <Btn variant="ghost" onClick={()=>setStep("paste")}>← Retour</Btn>
+              <Btn variant="primary" onClick={doImport} style={{ opacity:selectedCount>0?1:0.4 }}>
+                📥 Importer {selectedCount} action{selectedCount>1?"s":""}
+              </Btn>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- Main App ---
+function App() {
+  const [actions, setActions] = useState(loadData);
+  const [vue, setVue] = useState("liste");
+  const [filtreCat, setFiltreCat] = useState("Tous");
+  const [filtreStatut, setFiltreStatut] = useState("tous");
+  const [expandedId, setExpandedId] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [mounted, setMounted] = useState(false);
+  const [dragId, setDragId] = useState(null);
+  const [dragOverCol, setDragOverCol] = useState(null);
+  const [lastSaved, setLastSaved] = useState(null);
+  const [importCROpen, setImportCROpen] = useState(false);
+
+  useEffect(()=>{ setTimeout(()=>setMounted(true),60); },[]);
+
+  const updateActions = useCallback((newActions) => {
+    setActions(newActions); saveData(newActions); setLastSaved(new Date());
+  },[]);
+
+  const handleSaveTask = (task) => {
+    const exists = actions.find(a=>a.id===task.id);
+    updateActions(exists ? actions.map(a=>a.id===task.id?task:a) : [...actions, task]);
+    setModalOpen(false); setEditingTask(null);
+  };
+  const handleDeleteTask = (id) => { updateActions(actions.filter(a=>a.id!==id)); setModalOpen(false); setEditingTask(null); };
+  const cycleStatut = (id) => { const order=["a_faire","en_cours","fait","bloque"]; updateActions(actions.map(a=>a.id!==id?a:{...a,statut:order[(order.indexOf(a.statut)+1)%4]})); };
+  const openEdit = (task) => { setEditingTask({...task}); setModalOpen(true); };
+  const openNew = () => { setEditingTask(null); setModalOpen(true); };
+  const moveAction = (id,dir) => { const idx=actions.findIndex(a=>a.id===id); const t=idx+dir; if(t<0||t>=actions.length) return; const n=[...actions]; [n[idx],n[t]]=[n[t],n[idx]]; updateActions(n); };
+
+  const handleDragStart = (id) => setDragId(id);
+  const handleDragEnd = () => { setDragId(null); setDragOverCol(null); };
+  const handleDrop = (col) => { if(dragId){ updateActions(actions.map(a=>a.id===dragId?{...a,statut:col}:a)); } setDragId(null); setDragOverCol(null); };
+
+  // Export / Import
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(actions, null, 2)], { type:"application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = "suivi-actions-natran.json"; a.click();
+  };
+  const importJSON = () => {
+    const input = document.createElement("input"); input.type="file"; input.accept=".json";
+    input.onchange = (e) => {
+      const file = e.target.files[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => { try { const data=JSON.parse(ev.target.result); if(Array.isArray(data)) updateActions(data); } catch(err){ alert("Fichier invalide"); } };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+  const resetData = () => { if(confirm("Remettre les données par défaut ? Les modifications seront perdues.")) updateActions(INITIAL_ACTIONS); };
+  const handleImportCR = (newActions) => { updateActions([...actions, ...newActions]); };
+
+  const filtered = actions.filter(a => {
+    if(filtreCat!=="Tous" && a.categorie!==filtreCat) return false;
+    if(filtreStatut!=="tous" && a.statut!==filtreStatut) return false;
+    return true;
+  });
+
+  const stats = { total:actions.length, fait:actions.filter(a=>a.statut==="fait").length, en_cours:actions.filter(a=>a.statut==="en_cours").length, critique:actions.filter(a=>a.priorite==="critique"&&a.statut!=="fait").length };
+  const progress = stats.total>0?(stats.fait/stats.total)*100:0;
+  const kanbanCols = ["a_faire","en_cours","fait","bloque"];
+
+  return (
+    <div style={{ position:"relative", zIndex:1 }}>
+      {/* BG */}
+      <div style={{ position:"fixed", inset:0, pointerEvents:"none", zIndex:0 }}>
+        <div style={{ position:"absolute", top:"-15%", right:"-8%", width:"700px", height:"700px", background:"radial-gradient(circle, rgba(99,102,241,0.04) 0%, transparent 60%)", borderRadius:"50%" }} />
+        <div style={{ position:"absolute", bottom:"-8%", left:"-4%", width:"500px", height:"500px", background:"radial-gradient(circle, rgba(56,189,248,0.03) 0%, transparent 60%)", borderRadius:"50%" }} />
+        <div style={{ position:"absolute", top:"40%", left:"50%", width:"400px", height:"400px", background:"radial-gradient(circle, rgba(16,185,129,0.025) 0%, transparent 60%)", borderRadius:"50%", transform:"translateX(-50%)" }} />
+      </div>
+
+      <div style={{ position:"relative", zIndex:1, maxWidth:"1300px", margin:"0 auto", padding:"28px 24px" }}>
+        {/* Header */}
+        <div style={{ opacity:mounted?1:0, transform:mounted?"translateY(0)":"translateY(-16px)", transition:"all 0.7s cubic-bezier(0.16,1,0.3,1)", marginBottom:"24px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:"16px" }}>
+          <div>
+            <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"6px" }}>
+              <div style={{ width:"6px", height:"6px", borderRadius:"50%", background:"#818cf8" }} />
+              <span style={{ fontSize:"11px", fontWeight:500, letterSpacing:"2.5px", textTransform:"uppercase", color:"#818cf8" }}>SUIVI D'ACTIONS</span>
+            </div>
+            <h1 style={{ fontFamily:"'Fraunces', serif", fontSize:"clamp(26px, 3.5vw, 36px)", fontWeight:600, margin:"4px 0 2px", lineHeight:1.15, color:"#f1f5f9", letterSpacing:"-0.02em" }}>POC EAM — SAP</h1>
+            <p style={{ color:"#475569", fontSize:"12px", margin:0 }}>
+              {lastSaved ? `Sauvegardé : ${lastSaved.toLocaleTimeString("fr-FR")}` : "Sauvegarde automatique locale"} · {new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}
+            </p>
+          </div>
+          <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
+            <Btn onClick={()=>setImportCROpen(true)} variant="primary" style={{ fontSize:"11px", padding:"8px 14px", background:"rgba(16,185,129,0.2)", border:"1px solid rgba(16,185,129,0.4)", color:"#6ee7b7" }}>📋 Import CR</Btn>
+            <Btn onClick={exportJSON} variant="ghost" style={{ fontSize:"11px", padding:"8px 14px" }}>⬇ Exporter</Btn>
+            <Btn onClick={importJSON} variant="ghost" style={{ fontSize:"11px", padding:"8px 14px" }}>⬆ Importer</Btn>
+            <Btn onClick={resetData} variant="ghost" style={{ fontSize:"11px", padding:"8px 14px" }}>↺ Reset</Btn>
+            <Btn onClick={openNew} variant="primary" style={{ padding:"10px 22px", fontSize:"14px" }}>＋ Nouvelle action</Btn>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))", gap:"10px", marginBottom:"22px", opacity:mounted?1:0, transition:"all 0.7s ease 0.1s" }}>
+          {[
+            { label:"Total", value:stats.total, color:"#818cf8", sub:"actions" },
+            { label:"Terminées", value:stats.fait, color:"#10b981", sub:`${Math.round(progress)}%` },
+            { label:"En cours", value:stats.en_cours, color:"#f59e0b", sub:"actives" },
+            { label:"Critiques", value:stats.critique, color:"#ef4444", sub:"à traiter" },
+          ].map((s,i)=>(
+            <div key={i} style={{ background:"rgba(255,255,255,0.025)", border:"1px solid rgba(255,255,255,0.05)", borderRadius:"12px", padding:"16px 18px" }}>
+              <div style={{ fontSize:"10px", textTransform:"uppercase", letterSpacing:"2px", color:"#525d6e", marginBottom:"6px", fontWeight:500 }}>{s.label}</div>
+              <div style={{ display:"flex", alignItems:"baseline", gap:"5px" }}>
+                <span style={{ fontSize:"24px", fontWeight:600, color:s.color }}>{s.value}</span>
+                <span style={{ fontSize:"11px", color:"#475569" }}>{s.sub}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Progress */}
+        <div style={{ marginBottom:"22px", background:"rgba(255,255,255,0.02)", borderRadius:"10px", padding:"14px 18px", border:"1px solid rgba(255,255,255,0.04)" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
+            <span style={{ fontSize:"11px", fontWeight:600, color:"#94a3b8", letterSpacing:"1px", textTransform:"uppercase" }}>Progression</span>
+            <span style={{ fontSize:"13px", fontWeight:700, color:"#818cf8" }}>{Math.round(progress)}%</span>
+          </div>
+          <div style={{ height:"5px", background:"rgba(255,255,255,0.06)", borderRadius:"3px", overflow:"hidden" }}>
+            <div style={{ height:"100%", width:`${progress}%`, borderRadius:"3px", background:"linear-gradient(90deg, #818cf8, #38bdf8, #34d399)", transition:"width 0.8s ease", boxShadow:"0 0 20px rgba(129,140,248,0.2)" }} />
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", alignItems:"center", marginBottom:"20px" }}>
+          <div style={{ display:"flex", background:"rgba(255,255,255,0.03)", borderRadius:"10px", border:"1px solid rgba(255,255,255,0.06)", overflow:"hidden" }}>
+            {[{key:"liste",label:"☰ Liste"},{key:"kanban",label:"▦ Kanban"},{key:"timeline",label:"◫ Timeline"}].map(v=>(
+              <button key={v.key} onClick={()=>setVue(v.key)} style={{ padding:"7px 14px", fontSize:"12px", fontWeight:600, border:"none", cursor:"pointer", background:vue===v.key?"rgba(99,102,241,0.2)":"transparent", color:vue===v.key?"#a5b4fc":"#64748b", transition:"all 0.2s" }}>{v.label}</button>
+            ))}
+          </div>
+          <div style={{ width:"1px", height:"22px", background:"rgba(255,255,255,0.08)" }} />
+          <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
+            {["Tous",...CATEGORIES].map(c=>(
+              <button key={c} onClick={()=>setFiltreCat(c)} style={{ padding:"5px 12px", fontSize:"11px", fontWeight:500, border:`1px solid ${filtreCat===c?"rgba(99,102,241,0.3)":"rgba(255,255,255,0.06)"}`, cursor:"pointer", borderRadius:"7px", background:filtreCat===c?"rgba(99,102,241,0.2)":"rgba(255,255,255,0.04)", color:filtreCat===c?"#a5b4fc":"#64748b", transition:"all 0.2s" }}>{c}</button>
+            ))}
+          </div>
+          <div style={{ width:"1px", height:"22px", background:"rgba(255,255,255,0.08)" }} />
+          <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
+            <button onClick={()=>setFiltreStatut("tous")} style={{ padding:"5px 12px", fontSize:"11px", fontWeight:500, border:`1px solid ${filtreStatut==="tous"?"rgba(99,102,241,0.3)":"rgba(255,255,255,0.06)"}`, cursor:"pointer", borderRadius:"7px", background:filtreStatut==="tous"?"rgba(99,102,241,0.2)":"rgba(255,255,255,0.04)", color:filtreStatut==="tous"?"#a5b4fc":"#64748b" }}>Tous</button>
+            {Object.entries(STATUTS).map(([k,v])=>(
+              <button key={k} onClick={()=>setFiltreStatut(k)} style={{ padding:"5px 12px", fontSize:"11px", fontWeight:500, border:`1px solid ${filtreStatut===k?v.color+"40":"rgba(255,255,255,0.06)"}`, cursor:"pointer", borderRadius:"7px", background:filtreStatut===k?v.bg:"rgba(255,255,255,0.04)", color:filtreStatut===k?v.color:"#64748b" }}>{v.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* LIST VIEW */}
+        {vue==="liste" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+            {filtered.map((a,i)=>{
+              const isExp = expandedId===a.id; const st=STATUTS[a.statut]; const pr=PRIORITES[a.priorite];
+              return (
+                <div key={a.id} style={{ background:"rgba(255,255,255,0.02)", border:`1px solid ${isExp?"rgba(129,140,248,0.2)":"rgba(255,255,255,0.04)"}`, borderRadius:"10px", overflow:"hidden", transition:"all 0.25s", opacity:mounted?1:0, transform:mounted?"translateY(0)":"translateY(10px)", transitionDelay:`${0.2+i*0.03}s` }}>
+                  <div style={{ display:"flex", alignItems:"stretch" }}>
+                    <div style={{ width:"5px", background:st.color, flexShrink:0 }} />
+                    <div style={{ flex:1, padding:"12px 16px", cursor:"pointer", display:"flex", flexDirection:"column", gap:"6px" }} onClick={()=>setExpandedId(isExp?null:a.id)}>
+                      <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                        <span style={{ fontSize:"9px", fontWeight:600, letterSpacing:"1px", color:pr.color }}>{pr.icon} {pr.label}</span>
+                        <span style={{ fontSize:"9px", fontWeight:600, padding:"2px 8px", borderRadius:"5px", background:"rgba(129,140,248,0.08)", color:"#a5b4fc" }}>{a.categorie}</span>
+                      </div>
+                      <div style={{ fontSize:"14px", fontWeight:600, color:"#e2e8f0", lineHeight:1.3 }}>{a.action}</div>
+                      <div style={{ display:"flex", alignItems:"center", gap:"14px", flexWrap:"wrap" }}>
+                        <span style={{ fontSize:"11px", color:"#64748b" }}>👤 {a.responsables.join(", ")}</span>
+                        <span style={{ fontSize:"11px", color:"#64748b" }}>📅 {new Date(a.dateDebut).toLocaleDateString("fr-FR")} → {new Date(a.dateFin).toLocaleDateString("fr-FR")}</span>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:"6px", padding:"12px 14px" }}>
+                      <div style={{ display:"flex", flexDirection:"column", gap:"2px" }}>
+                        <button onClick={()=>moveAction(a.id,-1)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:"10px", color:"#475569", padding:"2px 6px", borderRadius:"4px" }}>▲</button>
+                        <button onClick={()=>moveAction(a.id,1)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:"10px", color:"#475569", padding:"2px 6px", borderRadius:"4px" }}>▼</button>
+                      </div>
+                      <button onClick={e=>{e.stopPropagation();cycleStatut(a.id);}} style={{ padding:"7px 14px", borderRadius:"8px", border:`1px solid ${st.color}40`, background:st.bg, color:st.color, fontSize:"11px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }} title="Cliquer pour changer le statut">{st.label}</button>
+                      <button onClick={e=>{e.stopPropagation();openEdit(a);}} style={{ padding:"7px 10px", borderRadius:"8px", border:"1px solid rgba(255,255,255,0.08)", background:"rgba(255,255,255,0.04)", color:"#94a3b8", fontSize:"12px", cursor:"pointer" }} title="Modifier">✎</button>
+                    </div>
+                  </div>
+                  {isExp && (
+                    <div style={{ padding:"0 16px 14px 21px", borderTop:"1px solid rgba(255,255,255,0.05)" }}>
+                      <div style={{ padding:"12px 14px", marginTop:"10px", background:"rgba(129,140,248,0.03)", borderRadius:"8px", border:"1px solid rgba(129,140,248,0.06)" }}>
+                        <div style={{ fontSize:"10px", fontWeight:600, letterSpacing:"1.5px", textTransform:"uppercase", color:"#818cf8", marginBottom:"4px" }}>DÉTAIL</div>
+                        <p style={{ fontSize:"12px", color:"#94a3b8", lineHeight:1.6, margin:0 }}>{a.detail||"Aucun détail."}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {filtered.length===0 && <div style={{ padding:"40px", textAlign:"center", color:"#475569", fontSize:"14px" }}>Aucune action ne correspond aux filtres.</div>}
+          </div>
+        )}
+
+        {/* KANBAN VIEW */}
+        {vue==="kanban" && (
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(240px, 1fr))", gap:"12px" }}>
+            {kanbanCols.map(col=>{
+              const st=STATUTS[col]; const items=filtered.filter(a=>a.statut===col); const isOver=dragOverCol===col;
+              return (
+                <div key={col} onDragOver={e=>{e.preventDefault();setDragOverCol(col);}} onDragLeave={()=>setDragOverCol(null)} onDrop={()=>handleDrop(col)}
+                  style={{ background:isOver?"rgba(129,140,248,0.05)":"rgba(255,255,255,0.015)", borderRadius:"14px", border:`1px solid ${isOver?"rgba(129,140,248,0.2)":"rgba(255,255,255,0.04)"}`, transition:"all 0.2s", overflow:"hidden" }}>
+                  <div style={{ padding:"14px 16px", borderBottom:"1px solid rgba(255,255,255,0.06)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:"8px" }}><div style={{ width:"8px", height:"8px", borderRadius:"50%", background:st.color }} /><span style={{ fontSize:"12px", fontWeight:700, color:st.color }}>{st.label}</span></div>
+                    <span style={{ fontSize:"10px", fontWeight:700, padding:"2px 7px", borderRadius:"5px", background:st.bg, color:st.color }}>{items.length}</span>
+                  </div>
+                  <div style={{ padding:"8px", display:"flex", flexDirection:"column", gap:"6px", minHeight:"80px" }}>
+                    {items.map(a=>{
+                      const pr=PRIORITES[a.priorite];
+                      return (
+                        <div key={a.id} draggable onDragStart={()=>handleDragStart(a.id)} onDragEnd={handleDragEnd}
+                          style={{ padding:"12px", borderRadius:"10px", background:dragId===a.id?"rgba(129,140,248,0.08)":"rgba(255,255,255,0.02)", border:`1px solid ${dragId===a.id?"rgba(129,140,248,0.2)":"rgba(255,255,255,0.04)"}`, cursor:"grab", transition:"all 0.2s", borderLeft:`3px solid ${st.color}`, opacity:dragId===a.id?0.5:1 }}>
+                          <div style={{ fontSize:"12px", fontWeight:600, color:"#e2e8f0", marginBottom:"6px", lineHeight:1.3 }}>{a.action}</div>
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", marginBottom:"6px" }}>
+                            <span style={{ fontSize:"9px", fontWeight:600, padding:"2px 7px", borderRadius:"4px", background:"rgba(129,140,248,0.08)", color:"#a5b4fc" }}>{a.categorie}</span>
+                            <span style={{ fontSize:"9px", color:pr.color, fontWeight:600 }}>{pr.icon}</span>
+                          </div>
+                          <div style={{ fontSize:"10px", color:"#475569" }}>👤 {a.responsables.join(", ")}</div>
+                          <div style={{ fontSize:"9px", color:"#374151", marginTop:"3px" }}>📅 {new Date(a.dateFin).toLocaleDateString("fr-FR")}</div>
+                          <button onClick={()=>openEdit(a)} style={{ marginTop:"8px", padding:"4px 10px", fontSize:"10px", fontWeight:600, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:"6px", color:"#94a3b8", cursor:"pointer" }}>✎ Modifier</button>
+                        </div>
+                      );
+                    })}
+                    {items.length===0 && <div style={{ padding:"20px", textAlign:"center", color:"#374151", fontSize:"11px", border:"1px dashed rgba(255,255,255,0.06)", borderRadius:"8px" }}>Glisser-déposer ici</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* TIMELINE VIEW */}
+        {vue==="timeline" && <TimelineView actions={filtered} onEdit={openEdit} />}
+
+
+
+        
+      </div>
+
+      {/* Import CR Modal */}
+      <ImportCRModal open={importCROpen} onClose={()=>setImportCROpen(false)} onImport={handleImportCR} existingActions={actions} />
+
+      {/* Modal */}
+      <Modal open={modalOpen} onClose={()=>{setModalOpen(false);setEditingTask(null);}} title={editingTask?"Modifier l'action":"Nouvelle action"}>
+        <TaskForm task={editingTask} onSave={handleSaveTask} onCancel={()=>{setModalOpen(false);setEditingTask(null);}} onDelete={editingTask?handleDeleteTask:null} />
+      </Modal>
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById("root"));
+</script>
+</body>
+</html>
