@@ -449,7 +449,7 @@ function App(){
   const[loading,setLoading]=useState(true);
   const[online,setOnline]=useState(true);
   const[vue,setVue]=useState("dashboard");
-  const[fCat,setFCat]=useState("Tous");const[fStat,setFStat]=useState("tous");
+  const[fCat,setFCat]=useState("Tous");const[fStat,setFStat]=useState("tous");const[fResp,setFResp]=useState("Tous");
   const[kanbanSort,setKanbanSort]=useState("default"); // default or priority
   const[expId,setExpId]=useState(null);
   const[modal,setModal]=useState(false);const[editing,setEditing]=useState(null);
@@ -478,8 +478,12 @@ function App(){
   const filtered=actions.filter(a=>{
     if(fCat!=="Tous"&&a.categorie!==fCat)return false;
     if(fStat!=="tous"&&a.statut!==fStat)return false;
+    if(fResp!=="Tous"&&!(a.responsables||[]).includes(fResp))return false;
     return true;
   });
+  
+  // Extract unique responsables
+  const allResps=[...new Set(actions.flatMap(a=>a.responsables||[]))].filter(r=>r).sort();
   
   const sortByPriority=(items)=>{
     return [...items].sort((a,b)=>PRIOS[a.priorite].order-PRIOS[b.priorite].order);
@@ -536,6 +540,13 @@ function App(){
             <div style={{display:"flex",gap:"4px",flexWrap:"wrap"}}>
               <button onClick={()=>setFCat("Tous")} style={{padding:"6px 12px",fontSize:"11px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"6px",background:fCat==="Tous"?"#ffedd5":"transparent",color:fCat==="Tous"?"#ea580c":"#64748b"}}>Toutes</button>
               {CATS.map(c=><button key={c} onClick={()=>setFCat(c)} style={{padding:"6px 12px",fontSize:"11px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"6px",background:fCat===c?"#ffedd5":"transparent",color:fCat===c?"#ea580c":"#64748b"}}>{c}</button>)}
+            </div>
+          </div>
+          <div className="filter-group">
+            <span className="filter-label" style={{color:"#0891b2"}}>Responsable</span>
+            <div style={{display:"flex",gap:"4px",flexWrap:"wrap",maxWidth:"400px"}}>
+              <button onClick={()=>setFResp("Tous")} style={{padding:"6px 12px",fontSize:"11px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"6px",background:fResp==="Tous"?"#cffafe":"transparent",color:fResp==="Tous"?"#0891b2":"#64748b"}}>Tous</button>
+              {allResps.map(r=><button key={r} onClick={()=>setFResp(r)} style={{padding:"6px 12px",fontSize:"11px",fontWeight:500,border:"none",cursor:"pointer",borderRadius:"6px",background:fResp===r?"#cffafe":"transparent",color:fResp===r?"#0891b2":"#64748b"}}>{r}</button>)}
             </div>
           </div>
         </>)}
